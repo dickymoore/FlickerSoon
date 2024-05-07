@@ -70,30 +70,7 @@ func buildAPIURL(title, year, baseURL, typeParam string) string {
 
 	return apiURL
 }
-func fetchData(title, year, baseURL, apiKey, typeParam string) (map[string]interface{}, error) {
-	apiURL := buildAPIURL(title, year, baseURL+apiKey+"&", typeParam)
 
-	// Make an HTTP request using the client
-	resp, err := http.Get(apiURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make HTTP request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read the response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Unmarshal JSON response
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
-	}
-
-	return data, nil
-}
 func main() {
 	var err error
 	config, err = LoadConfig()
