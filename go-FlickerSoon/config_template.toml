@@ -1,0 +1,23 @@
+# FlickerSoon Configuration
+#############################
+#                           #
+# Update this section       #
+#                           #
+#############################
+[OmdbApi]
+api_key = "" # Insert your OMDb API here
+
+[TmdbApi]
+api_key = "" # Insert your TMDb API here
+
+##############################
+#                            #
+# Leave this section unless  #
+# you know what you're doing #
+#                            #
+##############################
+
+[Endpoints]
+omdb_endpoint = "" # Insert your OMDb endpoint here
+tmdb_endpoint = "" # Insert your TMDb endpoint here
+
