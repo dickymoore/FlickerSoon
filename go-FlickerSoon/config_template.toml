@@ -4,11 +4,9 @@
 # Update this section       #
 #                           #
 #############################
-[OmdbApi]
-api_key = "" # Insert your OMDb API here
-
-[TmdbApi]
-api_key = "" # Insert your TMDb API here
+[Apis]
+OmdbApiKey = "ec2ae74" # Insert your OMDb API here
+TmdbApiKey = "" # Insert your TMDb API here
 
 ##############################
 #                            #
@@ -18,6 +16,6 @@ api_key = "" # Insert your TMDb API here
 ##############################
 
 [Endpoints]
-omdb_endpoint = "" # Insert your OMDb endpoint here
-tmdb_endpoint = "" # Insert your TMDb endpoint here
+OmdbEndpoint = "http://www.omdbapi.com/?apikey=" # Insert your OMDb endpoint here
+TmdbEndpoint = "" # Insert your TMDb endpoint here
 
