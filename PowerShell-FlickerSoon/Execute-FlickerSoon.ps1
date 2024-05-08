@@ -75,6 +75,50 @@ function Get-Data {
     return $data
 }
 
+# Function to fetch data from TMDb using API key
+function Get-TmdbDataWithApiKey {
+    param (
+        [string]$MovieId,
+        [string]$ApiKey,
+        [string]$BaseURL
+    )
+
+    # Construct the API URL
+    $apiUrl = "$BaseURL$MovieId?api_key=$ApiKey"
+
+    # Make the HTTP request
+    try {
+        $response = Invoke-RestMethod -Uri $apiUrl -Method Get
+        return $response
+    }
+    catch {
+        Write-Error "Failed to fetch data from TMDb with API key: $_"
+        return $null
+    }
+}
+
+# Function to fetch data from TMDb using Bearer token
+function Get-TmdbDataWithBearerToken {
+    param (
+        [string]$MovieId,
+        [string]$BearerToken,
+        [string]$BaseURL
+    )
+
+    # Construct the API URL
+    $apiUrl = "$BaseURL$MovieId"
+
+    # Make the HTTP request with Bearer token
+    try {
+        $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers @{ "Authorization" = "Bearer $BearerToken" }
+        return $response
+    }
+    catch {
+        Write-Error "Failed to fetch data from TMDb with Bearer token: $_"
+        return $null
+    }
+}
+
 # Main function
 function Main {
     # Load configuration
@@ -84,16 +128,31 @@ function Main {
         return
     }
 
-    # Get data from the API
-    $data = Get-Data -title "Civil War" -year "2024" -baseURL $config.Endpoints.OmdbEndpoint -apiKey $config.Apis.OmdbApiKey -typeParam "movie"
-    if (-not $data) {
-        Write-Error "Failed to get data from API"
+    # Get data from OMDB
+    $omdbData = Get-Data -title "Civil War" -year "2024" -baseURL $config.Endpoints.OmdbEndpoint -apiKey $config.Apis.OmdbApiKey -typeParam "movie"
+    if (-not $omdbData) {
+        Write-Error "Failed to get data from OMDB API"
+        return
+    }
+
+    # Get data from TMDb using API key
+    $tmdbDataWithApiKey = Get-TmdbDataWithApiKey -MovieId "11" -ApiKey $config.Apis.TmdbApiKey -BaseURL $config.Endpoints.TmdbEndpoint
+    if (-not $tmdbDataWithApiKey) {
+        Write-Error "Failed to get data from TMDb API with API key"
+        return
+    }
+
+    # Get data from TMDb using Bearer token
+    $tmdbDataWithBearerToken = Get-TmdbDataWithBearerToken -MovieId "11" -BearerToken $config.TmdbBearerToken -BaseURL $config.Endpoints.TmdbEndpoint
+    if (-not $tmdbDataWithBearerToken) {
+        Write-Error "Failed to get data from TMDb API with Bearer token"
         return
     }
 
     # Print some information from the data
-    Write-Host "Title: $($data.Title)"
-    Write-Host "Year: $($data.Year)"
+    Write-Host "OMDB Data: $($omdbData | ConvertTo-Json -Depth 5)"
+    Write-Host "TMDb Data with API Key: $($tmdbDataWithApiKey | ConvertTo-Json -Depth 5)"
+    Write-Host "TMDb Data with Bearer Token: $($tmdbDataWithBearerToken | ConvertTo-Json -Depth 5)"
 }
 
 # Run main function
