@@ -71,12 +71,7 @@ func buildAPIURL(title, year, baseURL, typeParam string) string {
 	return apiURL
 }
 
-func main() {
-	var err error
-	config, err = LoadConfig()
-	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
-	}
+func getData(title, year, baseURL, apiKey, typeParam string) ([]byte, error) {
 
 	client := http.Client{
 		Timeout: 10 * time.Second,
@@ -107,6 +102,16 @@ func main() {
 	if err := json.Unmarshal(body, &data); err != nil {
 		log.Fatalf("failed to unmarshal JSON: %v", err)
 	}
+
+}
+
+func main() {
+	var err error
+	config, err = LoadConfig()
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+	data, err := getData("Civil War", "2024", config.Endpoints.OmdbEndpoint, config.Apis.OmdbApiKey, "movie")
 
 	// Print some information from the data
 	fmt.Println("Title:", data["Title"])
