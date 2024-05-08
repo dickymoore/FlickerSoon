@@ -2,14 +2,20 @@
 function Read-Configuration {
     param ()
     $configPath = "./config.json"
-    try {
-        $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
-        Write-Host "Config loaded."
+    $config = Get-Content -Path $configPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+    Write-Host "Config loaded."
+    if ([bool]$config) {
+        if ("" -eq $config.Apis.OmdbApiKey) -or `
+            ("" -eq $config.Apis.TmdbApiKey) -or `
+            ("" -eq $config.Endpoints.OmdbEndpoint) -or `
+            ("" -eq $config.Apis.TmdbEndpoint) `
+            {
+                Write-Error "Failed to readconfiguration from file. Have you updated config.json?"
+            }
+        Write-Host "Config loaded"
         return $config
-    }
-    catch {
-        Write-Error "Failed to read configuration file: $_"
-        return $null
+    } else {
+        Write-Error "Failed to read configuration file. Have you created config.json from the template config_template.json?"
     }
 }
 
