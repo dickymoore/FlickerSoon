@@ -9,6 +9,7 @@ function Read-Configuration {
         $requiredFields = @(
             @{ Name = "OMDb API Key"; Value = $config.Apis.OmdbApiKey },
             @{ Name = "TMDb API Key"; Value = $config.Apis.TmdbApiKey },
+            @{ Name = "TMDb Bearer Token"; Value = $config.Apis.TmdbBearerToken },
             @{ Name = "OMDb Endpoint"; Value = $config.Endpoints.OmdbEndpoint },
             @{ Name = "TMDb Endpoint"; Value = $config.Endpoints.TmdbEndpoint }
         )
@@ -105,12 +106,9 @@ function Get-TmdbDataWithBearerToken {
         [string]$BaseURL
     )
 
-    # Construct the API URL
-    $apiUrl = "$BaseURL$MovieId"
-
     # Make the HTTP request with Bearer token
     try {
-        $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers @{ "Authorization" = "Bearer $BearerToken" }
+        $response = Invoke-RestMethod -Uri $BaseURL -Method Get -Headers @{ "Authorization" = "Bearer $BearerToken" }
         return $response
     }
     catch {
@@ -143,7 +141,7 @@ function Main {
     }
 
     # Get data from TMDb using Bearer token
-    $tmdbDataWithBearerToken = Get-TmdbDataWithBearerToken -MovieId "11" -BearerToken $config.TmdbBearerToken -BaseURL $config.Endpoints.TmdbEndpoint
+    $tmdbDataWithBearerToken = Get-TmdbDataWithBearerToken -MovieId "11" -BearerToken $config.Apis.TmdbBearerToken -BaseURL $config.Endpoints.TmdbEndpoint
     if (-not $tmdbDataWithBearerToken) {
         Write-Error "Failed to get data from TMDb API with Bearer token"
         return
