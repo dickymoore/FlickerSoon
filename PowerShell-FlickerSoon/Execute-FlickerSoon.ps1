@@ -1,19 +1,27 @@
 # Read configuration from config.json
 function Read-Configuration {
-    param ()
-    $configPath = "./config.json"
+    param (
+        $configPath = "./config.json"
+    )
     $config = Get-Content -Path $configPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
     Write-Host "Config loaded."
     if ([bool]$config) {
-        if ("" -eq $config.Apis.OmdbApiKey) -or `
-            ("" -eq $config.Apis.TmdbApiKey) -or `
-            ("" -eq $config.Endpoints.OmdbEndpoint) -or `
-            ("" -eq $config.Apis.TmdbEndpoint) `
-            {
-                Write-Error "Failed to readconfiguration from file. Have you updated config.json?"
-            }
-        Write-Host "Config loaded"
-        return $config
+        $requiredFields = @(
+            @{ Name = "OMDb API Key"; Value = $config.Apis.OmdbApiKey },
+            @{ Name = "TMDb API Key"; Value = $config.Apis.TmdbApiKey },
+            @{ Name = "OMDb Endpoint"; Value = $config.Endpoints.OmdbEndpoint },
+            @{ Name = "TMDb Endpoint"; Value = $config.Endpoints.TmdbEndpoint }
+        )
+    
+        $missingValues = $requiredFields | Where-Object { [string]::IsNullOrEmpty($_.Value) } | ForEach-Object { $_.Name }
+    
+        if ($missingValues.Count -gt 0) {
+            $errorMessage = "Failed to read configuration from file. The following fields are missing or empty: $($missingValues -join ', '). Please update config.json."
+            Write-Error $errorMessage
+        } else {
+            Write-Host "Config loaded"
+            return $config
+        }
     } else {
         Write-Error "Failed to read configuration file. Have you created config.json from the template config_template.json?"
     }
