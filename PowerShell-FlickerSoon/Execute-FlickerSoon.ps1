@@ -117,21 +117,20 @@ function Get-TmdbDataWithBearerToken {
     }
 }
 
-# Main function
-function Main {
-    # Load configuration
+# Get-FutureFilms function
+function Get-FutureFilms {
     $config = Read-Configuration
     if (-not $config) {
         Write-Error "Failed to load config"
         return
     }
 
-    # Get data from OMDB
-    $omdbData = Get-Data -title "Civil War" -year "2024" -baseURL $config.Endpoints.OmdbEndpoint -apiKey $config.Apis.OmdbApiKey -typeParam "movie"
-    if (-not $omdbData) {
-        Write-Error "Failed to get data from OMDB API"
-        return
-    }
+    # # Get data from OMDB
+    # $omdbData = Get-Data -title "Civil War" -year "2024" -baseURL $config.Endpoints.OmdbEndpoint -apiKey $config.Apis.OmdbApiKey -typeParam "movie"
+    # if (-not $omdbData) {
+    #     Write-Error "Failed to get data from OMDB API"
+    #     return
+    # }
 
     # Get data from TMDb using API key
     $tmdbDataWithApiKey = Get-TmdbDataWithApiKey -MovieId "11" -ApiKey $config.Apis.TmdbApiKey -BaseURL $config.Endpoints.TmdbEndpoint
@@ -153,5 +152,5 @@ function Main {
     Write-Host "TMDb Data with Bearer Token: $($tmdbDataWithBearerToken | ConvertTo-Json -Depth 5)"
 }
 
-# Run main function
-Main
+# Run Get-FutureFilms function
+Get-FutureFilms
