@@ -106,9 +106,12 @@ function Get-TmdbDataWithBearerToken {
         [string]$BaseURL
     )
 
+    # Construct the API URL with the MovieId
+    $apiUrl = "$BaseURL/movie/$MovieId"
+
     # Make the HTTP request with Bearer token
     try {
-        $response = Invoke-RestMethod -Uri $BaseURL -Method Get -Headers @{ "Authorization" = "Bearer $BearerToken" }
+        $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers @{ "Authorization" = "Bearer $BearerToken" }
         return $response
     }
     catch {
@@ -116,6 +119,7 @@ function Get-TmdbDataWithBearerToken {
         return $null
     }
 }
+
 
 # Get-FutureFilms function
 function Get-FutureFilms {
@@ -133,7 +137,7 @@ function Get-FutureFilms {
     # }
 
     # Get data from TMDb using API key
-    $tmdbDataWithApiKey = Get-TmdbDataWithApiKey -MovieId "11" -ApiKey $config.Apis.TmdbApiKey -BaseURL $config.Endpoints.TmdbEndpoint
+    $tmdbDataWithBearerToken = Get-TmdbDataWithBearerToken -MovieId "11" -BearerToken $config.Apis.TmdbBearerToken -BaseURL $config.Endpoints.TmdbEndpoint
     if (-not $tmdbDataWithApiKey) {
         Write-Error "Failed to get data from TMDb API with API key"
         return
