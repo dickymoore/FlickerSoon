@@ -1,0 +1,16 @@
+{
+    "Apis": {
+      "OmdbApiKey": "ec2ae74",
+      "TmdbApiKey": "25af947433f221d43fd97266fb2c70f8",
+      "TmdbBearerToken": "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyNWFmOTQ3NDMzZjIyMWQ0M2ZkOTcyNjZmYjJjNzBmOCIsInN1YiI6IjY2MzlmZWQ0ZDZkYmJhMDEyYjYwZWQ3MCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.pOaozUyYkNDPyQ0REN6-UtnNQrsNH0U7M0BXknMlhcs"
+    },
+    "Settings": {
+      "LookAheadWeeks": "4",
+      "IncludeAdult": "False",
+      "Region": "GB"
+    },
+    "Endpoints": {
+      "OmdbEndpoint": "http://www.omdbapi.com/?apikey=",
+      "TmdbEndpoint": "https://api.themoviedb.org"
+    }
+  }

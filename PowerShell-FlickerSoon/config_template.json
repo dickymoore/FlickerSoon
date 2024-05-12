@@ -9,6 +9,8 @@
     "TmdbEndpoint": ""
   },
   "Settings": {
-    "LookAheadWeeks": ""
+    "LookAheadWeeks": "",
+    "IncludeAdult": "",
+    "Region": ""
   }
 }
