@@ -155,7 +155,7 @@ function Show-Menu {
             Out-UpcomingMovies -movies $upcomingMovieList -Destination "Spreadsheet"
         }
         "3" {
-            Make-Recommendations $upcomingMovieList
+            Get-Recommendations $upcomingMovieList
         }
         "4" {
             exit 0
@@ -203,7 +203,7 @@ function Out-UpcomingMovies {
     }
 }
 
-function Make-Recommendations {
+function Get-Recommendations {
     param ($movies)
     # Implement recommendation logic based on factors like recent IMDB ratings of the director, writer, actors, etc.
     Write-Host "Making recommendations..."
