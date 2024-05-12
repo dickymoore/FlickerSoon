@@ -92,7 +92,12 @@ function Get-UpcomingMovies {
             return $null
         }
     }
-    
+    $genreList = try {
+        ((Invoke-WebRequest -Uri "$($tmdbEndpoint)/3/genre/movie/list?api_key=$($tmdbApi)" -Method GET).Content | ConvertFrom-Json).genres
+    } catch {
+        Write-Error "Couldn't get Genres"
+    }
+
     $upcomingMovies = foreach ($upcomingMovie in ($upcomingMovieList.results[0..($maxLimit-1)])) {
         Write-Debug "Retreiving credits for $($upcomingMovie.title)"
         $apiUrl = "$($tmdbEndpoint)/3/movie/$($upcomingMovie.id)/credits?api_key=$($tmdbApi)"
@@ -106,8 +111,109 @@ function Get-UpcomingMovies {
             Write-Error "Failed to get credits for movie $($upcomingMovie.title): $_"
             return $null
         }
+        $genreNames = foreach ($genreId in $upcomingMovie.genre_ids) {
+            Write-Debug "Finding genre Id: $($genreId)"
+            $genre = $genreList | Where-Object { $_.id -eq $genreId }
+            Write-Debug "Found genre: $($genre.name)"
+            $genre.name
+        }
+        $genres = $genreNames -join ', '
+        $upcomingMovie | Add-Member -MemberType NoteProperty -Name "Genres" -Value $genres
+        $upcomingMovie
     }
     $upcomingMovies
+}
+
+function Show-Menu {
+    Write-Host @"
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⣠⣤⣤⣤⡀⠀⢀⣼⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⣾⣿⣿⣿⣿⣿⡄⢸⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⢿⣿⣿⣿⣿⣿⠃⠘⢿⣿⣿⣿⣿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠙⠛⠛⠛⠁⠀⠀⠀⠙⠛⠛⠛⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⡆⢰⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⡆⠀⠀⠀⢀⣀⣤⠀⠀⠀⠀
+⠀⠀⠀⠀⠁⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢠⣴⣾⣿⣿⣿⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠈⠉⠛⠿⣿⣿⠀⠀⠀⠀
+
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣿⣿⢻⣟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣸⠃⣿⠈⢿⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡟⠀⣿⠀⠘⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⢠⡿⠁⠀⣿⠀⠀⠘⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+"@ -ForegroundColor Green
+    Write-Host "FlickerSoon"
+    Write-Host "___________"
+    Write-Host "1. Show upcoming movies"
+    Write-Host "2. Export upcoming movies to spreadsheet"
+    Write-Host "3. Make recommendations"
+    Write-Host "4. Exit"
+    $choice = Read-Host "Enter your choice (1, 2, or 3)"
+    switch ($choice) {
+        "1" {
+            Out-UpcomingMovies -movies $upcomingMovieList -Destination "Display"
+        }
+        "2" {
+            Out-UpcomingMovies -movies $upcomingMovieList -Destination "Spreadsheet"
+        }
+        "3" {
+            Make-Recommendations $upcomingMovieList
+        }
+        "4" {
+            exit 0
+        }
+        default {
+            Show-Menu
+        }
+    }
+}
+
+function Out-UpcomingMovies {
+    param (
+        $movies,
+        $destination
+    )
+    $outView = foreach ($movie in $movies) {
+        $directors = $movie.crew | Where-Object { $_.job -eq 'Director' } | Select-Object -ExpandProperty name
+        $writers = $movie.crew | Where-Object { $_.job -eq 'Writer' } | Select-Object -ExpandProperty name
+        $producers = $movie.crew | Where-Object { $_.job -eq 'Producer' } | Select-Object -ExpandProperty name
+        
+        $actors = $movie.Cast[0..2].name -join ', '
+        $genres = $movie.Genres -join ', '
+        
+        [PSCustomObject]@{
+            Title = $movie.Title
+            Genres = $genres
+            release_date = $movie.release_date
+            Director = $directors -join ', '
+            Writer = $writers -join ', '
+            Producer = $producers -join ', '
+            Actors = $actors
+            overview = $movie.overview
+        }
+    }
+    switch ($destination) {
+        "Display" {
+            $outView | Out-GridView
+        }
+        "SpreadSheet" {
+            # Export CSV here
+        }
+        default {
+            Write-Error "Unknown destination specified in Out-UpcomingMovies."
+        }
+    }
+}
+
+function Make-Recommendations {
+    param ($movies)
+    # Implement recommendation logic based on factors like recent IMDB ratings of the director, writer, actors, etc.
+    Write-Host "Making recommendations..."
+    # Example:
+    # foreach ($movie in $movies) {
+    #     $directorRating = Get-DirectorRating $movie.Crew
+    #     $writerRating = Get-WriterRating $movie.Crew
+    #     $actorsRating = Get-ActorsRating $movie.Cast
+    #     Write-Host "Recommendation for $($movie.title): Director Rating - $directorRating, Writer Rating - $writerRating, Actors Rating - $actorsRating"
+    # }
 }
 
 #######################
@@ -152,6 +258,22 @@ $upcomingMovieList = Get-UpcomingMovies `
     -includeAdult $config.Settings.includeAdult `
     -Region $config.Settings.Region `
     -MaxLimit $config.Settings.MaxLimit
+
+###########################
+#
+# Prompt for action
+# 
+###########################
+
+Show-Menu
+
+
+
+
+
+
+
+
 
 
     $tmdbApi = $config.Apis.TmdbApiKey
