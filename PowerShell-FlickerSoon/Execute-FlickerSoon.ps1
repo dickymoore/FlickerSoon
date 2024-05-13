@@ -57,7 +57,7 @@ function New-ConfigFile {
         $config | ConvertTo-Json | Set-Content -Path $configPath
         Write-Host "Config file created successfully."
     }  else {
-        Write-Host "Need config file or parameters."
+        Write-Error "Need config file or parameters."
     }
 }
 
@@ -119,12 +119,16 @@ function Get-UpcomingMovies {
         }
         $genres = $genreNames -join ', '
         $upcomingMovie | Add-Member -MemberType NoteProperty -Name "Genres" -Value $genres
-        $upcomingMovie
     }
     $upcomingMovies
 }
 
 function Show-Menu {
+    param (
+        $config,
+        $upcomingMovieList
+    )
+    Clear-Host
     Write-Host @"
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⣠⣤⣤⣤⡀⠀⢀⣼⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -140,13 +144,13 @@ function Show-Menu {
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡟⠀⣿⠀⠘⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⢠⡿⠁⠀⣿⠀⠀⠘⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 "@ -ForegroundColor Green
-    Write-Host "FlickerSoon"
-    Write-Host "___________"
-    Write-Host "1. Show upcoming movies"
-    Write-Host "2. Export upcoming movies to spreadsheet"
-    Write-Host "3. Make recommendations"
-    Write-Host "4. Exit"
-    $choice = Read-Host "Enter your choice (1, 2, or 3)"
+    Write-Host "FlickerSoon
+___________
+1. Show upcoming movies
+2. Export upcoming movies to spreadsheet
+3. Make recommendations
+4. Exit" -ForegroundColor Yellow
+    $choice = Read-Host "Enter your choice"
     switch ($choice) {
         "1" {
             Out-UpcomingMovies -movies $upcomingMovieList -Destination "Display"
@@ -155,7 +159,7 @@ function Show-Menu {
             Out-UpcomingMovies -movies $upcomingMovieList -Destination "Spreadsheet"
         }
         "3" {
-            Get-Recommendations $upcomingMovieList
+            Get-Recommendations -upcomingMovieList $upcomingMovieList -config $config
         }
         "4" {
             exit 0
@@ -195,25 +199,231 @@ function Out-UpcomingMovies {
             $outView | Out-GridView
         }
         "SpreadSheet" {
-            # Export CSV here
+            $csvPath = ".\FlickerSoon-Upcoming-$((Get-Date).ToString("yyyyMMddHHss")).csv"
+            $outView | Export-Csv -Path $csvPath -NoTypeInformation
+            Start-Process -FilePath $csvPath            
         }
         default {
             Write-Error "Unknown destination specified in Out-UpcomingMovies."
         }
     }
 }
+function Get-PersonSummary {
+    param (
+        $ProjectsSummary
+    )
+    $movieSummary = [PSCustomObject]@{
+        Role = ""
+        Name = ""
+        Credits = 0
+        TotalIMDBRating = 0
+        TotalRottenTomatoesRating = 0
+        MaxIMDBRating = 0
+        MaxRottenTomatoesRating = 0
+        AverageIMDBRating = 0
+        AverageRottenTomatoesRating = 0
+        TotalBoxOffice = 0
+        AverageBoxOffice = 0
+    }
+    $uniqueTitles = New-Object System.Collections.Generic.HashSet[string]
 
+    foreach ($project in $ProjectsSummary) {
+        Write-Debug "Credits processed: $($movieSummary.Credits)"
+        $role = $project.Role
+        if ($uniqueTitles.Contains($project.Title)) {
+            Write-Debug "$($project.Title) already processed"
+            continue
+        } else {
+            Write-Debug "$($project.Title) not yet processed"
+            $uniqueTitles.Add($project.Title) > $null
+        }
+        $movieSummary.Role = $role
+        $movieSummary.Name = $project.Name
+        $movieSummary.Credits++
+        $movieSummary.TotalIMDBRating += $project.IMDB_Rating
+        $movieSummary.TotalRottenTomatoesRating += $project.Rotten_Tomatoes_Rating
+
+        if ($project.IMDB_Rating -gt $movieSummary.MaxIMDBRating) {
+            $movieSummary.MaxIMDBRating = $project.IMDB_Rating
+        }
+
+        if ($project.Rotten_Tomatoes_Rating -gt $movieSummary.MaxRottenTomatoesRating) {
+            $movieSummary.MaxRottenTomatoesRating = $project.Rotten_Tomatoes_Rating
+        }
+        if ($project.BoxOffice -gt 0) {
+            $movieSummary.TotalBoxOffice += $project.BoxOffice
+        }
+    }
+    $movieSummary.AverageIMDBRating = if ($movieSummary.Credits -ne 0) { [math]::Round($movieSummary.TotalIMDBRating / $movieSummary.Credits) } else { 0 }
+    $movieSummary.AverageRottenTomatoesRating = if ($movieSummary.Credits -ne 0) { [math]::Round($movieSummary.TotalRottenTomatoesRating / $movieSummary.Credits) } else { 0 }
+    $movieSummary.AverageBoxOffice = if ($movieSummary.Credits -ne 0) { [math]::Round($movieSummary.TotalBoxOffice / $movieSummary.Credits)} else { 0 }
+
+    $movieSummary
+}
+function New-Recommendations {
+    param (
+        $movies,
+        $config,
+        $recommendationType,
+        $tmdbEndpoint = $config.Endpoints.TmdbEndpoint,
+        $tmdbApi = $config.Apis.TmdbApiKey,
+        $OmdbEndpoint = $config.Endpoints.OmdbEndpoint,
+        $OmdbApi = $config.Apis.OmdbApiKey
+    )
+    
+    Write-Debug "
+        New-Recommendations
+        `$movies = $($movies | Measure-Object).count
+        `$config = $($config)
+        `$recommendationType = $($recommendationType)
+        `$tmdbEndpoint =$tmdbEndpoint
+        `$tmdbApi = $($tmdbApi)
+        `$OmdbEndpoint = $($OmdbEndpoint)
+        `$OmdbApi = $($OmdbApi)
+    "
+    foreach ($movie in $movies) {
+        $people = $movie.Cast + $movie.Crew | Where-Object { $_.job -eq $recommendationType }
+        Write-Debug "Found $(($people | Measure-Object).count) people with that role: $($people.name)"
+        $allPeople = foreach ($person in $people) {
+            Write-Debug "Looking for credits for: $($people.name) with ID: $($person.id)"
+            Write-Debug "((Invoke-WebRequest -Uri `"$($tmdbEndpoint)/3/person/$($person.id)/combined_credits?api_key=$($tmdbApi)`" -Method GET).Content | ConvertFrom-Json)"
+            $tmdbResponse = ((Invoke-WebRequest -Uri "$($tmdbEndpoint)/3/person/$($person.id)/combined_credits?api_key=$($tmdbApi)" -Method GET).Content | ConvertFrom-Json)
+            $personInfoAll = $tmdbResponse.cast + $tmdbResponse.crew  | Where-Object -Property job -eq $recommendationType
+            $personInfoMovieOnly = $personInfoAll | Where-Object {
+                ($_.media_type -eq "movie")
+            }
+            $personInfoHistoric = $personInfoMovieOnly | Where-Object {
+                $_.release_date
+            } | Where-Object {
+                ([datetime]::Parse($_.release_date) -lt [datetime]::Now)
+            }
+            $projectsSummary = foreach ($personProject in ($personInfoHistoric)) {
+                $projectObject = [PSCustomObject]@{}
+                if ($person.name) { 
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Name" -Value $person.name 
+                } else {
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Name" -Value 0
+                }
+                if ($person.id) { 
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Person_id" -Value $person.id 
+                } else {
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Person_id" -Value 0
+                }
+                if ($personProject.title) { 
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Title" -Value $personProject.title 
+                } else {
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Title" -Value 0
+                }
+                if ($personProject.job) { 
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Role" -Value $personProject.job 
+                } else {
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Role" -Value 0
+                }
+                if ($personProject.release_date) { 
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Release_date" -Value $personProject.release_date 
+                } else {
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Release_date" -Value 0
+                }
+                try {
+                    $movieTitle = $projectObject.Title -replace ' ','+'
+                    $year = (Get-Date $personProject.release_date).Year
+                
+                    $url = "$OmdbEndpoint/?apikey=$omdbApi&t=$movieTitle&y=$year"
+                    $response = Invoke-RestMethod -Uri $url -Method GET
+
+                    if ($response.Error -eq "Movie not found!") {
+                        Write-Debug "Movie $($movieTitle) not found in $year. Trying one year earlier and one year later."
+                        $urlBefore = "$OmdbEndpoint/?apikey=$omdbApi&t=$movieTitle&y=$($year - 1)"
+                        $responseBefore = Invoke-RestMethod -Uri $urlBefore -Method GET
+                        if ($responseBefore.Error -ne "Movie not found!") {
+                            Write-Debug "Movie $($movieTitle) found in $($year -1)."
+                            $response = $responseBefore
+                        } else {
+                            $urlAfter = "$OmdbEndpoint/?apikey=$omdbApi&t=$movieTitle&y=$($year + 1)"
+                            $responseAfter = Invoke-RestMethod -Uri $urlAfter -Method GET
+                            if ($responseAfter.Error -ne "Movie not found!") {
+                                $response = $responseAfter
+                                Write-Debug "Movie $($movieTitle)  found in $($year +1)."
+                            }
+                        }
+                    }
+                    if ($response.Response -eq "True") {
+                        $imdbRating = if ($response.Ratings | Where-Object -property Source -eq "Internet Movie Database") { [math]::Round((($response.Ratings | Where-Object { $_.Source -eq "Internet Movie Database" }).Value).replace('/10','') / 10 * 100)} else {0}
+                        $rottenTomatoesRating = if ($response.Ratings | Where-Object -property Source -eq "Rotten Tomatoes") {(($response.Ratings | Where-Object { $_.Source -eq "Rotten Tomatoes" }).Value).replace('%','')} else {0}
+                        [int]$boxOffice = if ([bool]($response.BoxOffice -as [int])) {($response.BoxOffice).replace(',','').replace('$','')} else {0}
+                    } else {
+                        $imdbRating = 0
+                        $rottenTomatoesRating = 0
+                        [int]$boxOffice = 0
+                    }
+                } catch {
+                    $imdbRating = 0
+                    $rottenTomatoesRating = 0
+                    [int]$boxOffice = 0
+                }
+                $projectObject | Add-Member -MemberType NoteProperty -Name "IMDB_Rating" -Value $imdbRating
+                $projectObject | Add-Member -MemberType NoteProperty -Name "Rotten_Tomatoes_Rating" -Value $rottenTomatoesRating
+                $projectObject | Add-Member -MemberType NoteProperty -Name "BoxOffice" -Value $boxOffice
+                $projectObject
+            }
+            Get-PersonSummary -ProjectsSummary $projectsSummary
+        }
+        $allPeople | Add-Member -MemberType NoteProperty -Name "Movie" -Value $movie.title
+        $allPeople
+    }
+}
 function Get-Recommendations {
-    param ($movies)
-    # Implement recommendation logic based on factors like recent IMDB ratings of the director, writer, actors, etc.
-    Write-Host "Making recommendations..."
-    # Example:
-    # foreach ($movie in $movies) {
-    #     $directorRating = Get-DirectorRating $movie.Crew
-    #     $writerRating = Get-WriterRating $movie.Crew
-    #     $actorsRating = Get-ActorsRating $movie.Cast
-    #     Write-Host "Recommendation for $($movie.title): Director Rating - $directorRating, Writer Rating - $writerRating, Actors Rating - $actorsRating"
-    # }
+    param (
+        $movies,
+        $config
+    )
+    Clear-Host
+    Write-Host @"
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⣠⣤⣤⣤⡀⠀⢀⣼⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⣾⣿⣿⣿⣿⣿⡄⢸⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⢿⣿⣿⣿⣿⣿⠃⠘⢿⣿⣿⣿⣿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠙⠛⠛⠛⠁⠀⠀⠀⠙⠛⠛⠛⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⡆⢰⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⡆⠀⠀⠀⢀⣀⣤⠀⠀⠀⠀
+⠀⠀⠀⠀⠁⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢠⣴⣾⣿⣿⣿⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠈⠉⠛⠿⣿⣿⠀⠀⠀⠀
+
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣿⣿⢻⣟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣸⠃⣿⠈⢿⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡟⠀⣿⠀⠘⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⢠⡿⠁⠀⣿⠀⠀⠘⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+"@ -ForegroundColor Green
+    Write-Host "FlickerSoon Recommendations
+___________________________
+1. Recommend based on Director
+2. Recommend based on Writer
+3. Recommend on Producer
+4. Recommend on Actor
+5. Back to Main Menu." -ForegroundColor Yellow
+
+    $choice = Read-Host "Enter your choice"
+    switch ($choice) {
+        "1" {
+            New-Recommendations -movies $movies -config $config -recommendationType "Director"
+        }
+        "2" {
+            New-Recommendations -movies $movies -config $config -recommendationType "Writer"
+        }
+        "3" {
+            New-Recommendations -movies $movies -config $config -recommendationType "Producer"
+        }
+        "4" {
+            New-Recommendations -movies $movies -config $config -recommendationType "Actor"
+        }
+        "5" {
+
+        }
+        default {
+            Get-Recommendations
+        }
+    }
+    # return output to screen or csv or out-grid
+
 }
 
 #######################
@@ -265,10 +475,9 @@ $upcomingMovieList = Get-UpcomingMovies `
 # 
 ###########################
 
-Show-Menu
-
-
-
+while ($true) {
+    Show-Menu -config $config -upcomingMovieList $upcomingMovieList
+}
 
 
 
@@ -282,301 +491,3 @@ Show-Menu
     $includeAdult = $config.Settings.includeAdult
     $Region = $config.Settings.Region
     $MaxLimit = $config.Settings.MaxLimit
-
-
-
-
-
-
-
-
-# # Build API URL based on parameters
-# function Build-APIURL {
-#     param($title, $year, $baseURL, $typeParam)
-#     $apiURL = $baseURL
-#     $apiURL += "t=" + [uri]::EscapeDataString($title)
-#     if ($year -ne "") {
-#         $apiURL += "&y=" + $year
-#     }
-#     if ($typeParam -ne "") {
-#         $apiURL += "&type=" + $typeParam
-#     }
-#     return $apiURL
-# }
-
-# # Get data from the API
-# function Get-Data {
-#     param($title, $year, $baseURL, $apiKey, $typeParam)
-    
-#     $client = New-Object System.Net.WebClient
-#     $client.Timeout = 10000  # 10 seconds
-    
-#     # Set the endpoint using the variables in the config file
-#     $apiUrl = Build-APIURL -title "Civil War" -year "2024" -baseURL ($baseURL + $apiKey + "&") -typeParam "movie"
-    
-#     # Make an HTTP request
-#     try {
-#         $body = $client.DownloadString($apiUrl)
-#     }
-#     catch {
-#         Write-Error "Failed to make HTTP request: $_"
-#         return $null
-#     }
-    
-#     # Print the response body
-#     Write-Host "Response Body: $body"
-    
-#     # Process the data (for example, parse JSON)
-#     try {
-#         $data = ConvertFrom-Json $body
-#     }
-#     catch {
-#         Write-Error "Failed to parse JSON: $_"
-#         return $null
-#     }
-    
-#     return $data
-# }
-
-# # Function to fetch data from TMDb using API key
-# function Get-TmdbDataWithApiKey {
-#     param (
-#         [string]$MovieId,
-#         [string]$ApiKey,
-#         [string]$BaseURL
-#     )
-
-#     # Construct the API URL
-#     $apiUrl = "$BaseURL$MovieId?api_key=$ApiKey"
-
-#     # Make the HTTP request
-#     try {
-#         $response = Invoke-RestMethod -Uri $apiUrl -Method Get
-#         return $response
-#     }
-#     catch {
-#         Write-Error "Failed to fetch data from TMDb with API key: $_"
-#         return $null
-#     }
-# }
-
-# function Get-TmdbDataWithBearerToken {
-#     param (
-#         [string]$MovieId,
-#         [string]$BearerToken,
-#         [string]$BaseURL
-#     )
-
-#     # Construct the API URL with the MovieId
-#     $apiUrl = "$BaseURL/movie/$MovieId"
-
-#     # Make the HTTP request with Bearer token
-#     try {
-#         $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers @{ "Authorization" = "Bearer $BearerToken" }
-#         return $response
-#     }
-#     catch {
-#         Write-Error "Failed to fetch data from TMDb with Bearer token: $_"
-#         return $null
-#     }
-# }
-
-
-
-# # Function to fetch upcoming movies from TMDb using bearer token
-# function Get-UpcomingMoviesWithBearerToken {
-#     param (
-#         [string]$BearerToken,
-#         [string]$BaseURL
-#     )
-
-#     # Construct the API URL for upcoming movies
-#     $apiUrl = "$BaseURL/movie/upcoming"
-
-#     # Make the API request with bearer token
-#     try {
-#         $response = Invoke-RestMethod -Uri $apiUrl -Method Get -Headers @{ "Authorization" = "Bearer $BearerToken" }
-#         return $response
-#     }
-#     catch {
-#         Write-Error "Failed to fetch upcoming movies from TMDb: $_"
-#         return $null
-#     }
-# }
-# # Function to search for movies by title
-# function Search-Movies {
-#     param (
-#         [string]$Query,
-#         [string]$ApiKey,
-#         [string]$BaseURL
-#     )
-
-#     # Construct the API URL for searching movies
-#     $apiUrl = "$BaseURL/search/movie?query=$Query&api_key=$ApiKey"
-
-#     # Make the API request
-#     try {
-#         $response = Invoke-RestMethod -Uri $apiUrl -Method Get
-#         return $response
-#     }
-#     catch {
-#         Write-Error "Failed to search for movies on TMDb: $_"
-#         return $null
-#     }
-# }
-
-# # Function to fetch release dates for a movie
-# function Get-MovieReleaseDates {
-#     param (
-#         [string]$MovieId,
-#         [string]$ApiKey,
-#         [string]$BaseURL
-#     )
-
-#     # Construct the API URL for fetching release dates
-#     $apiUrl = "$BaseURL/movie/$MovieId/release_dates?api_key=$ApiKey"
-
-#     # Make the API request
-#     try {
-#         $response = Invoke-RestMethod -Uri $apiUrl -Method Get
-#         return $response
-#     }
-#     catch {
-#         Write-Error "Failed to fetch release dates for the movie from TMDb: $_"
-#         return $null
-#     }
-# }
-# # Get upcoming movies for the current year
-# function Get-UpcomingMoviesForCurrentYear {
-#     param (
-#         [string]$Year,
-#         [string]$ApiKey,
-#         [string]$BaseURL
-#     )
-
-#     # Construct the API URL for searching movies
-#     $apiUrl = "$BaseURL/discover/movie?primary_release_year=$Year&api_key=$ApiKey"
-
-#     # Make the API request
-#     try {
-#         $response = Invoke-RestMethod -Uri $apiUrl -Method Get
-#         return $response
-#     }
-#     catch {
-#         Write-Error "Failed to get upcoming movies for the current year from TMDb: $_"
-#         return $null
-#     }=     exit 1
-#  exit = $
-
-# # Example: Get upcoming movies for the current year
-# $config = Get-Configuration
-# if (-not $config)
-# }
-
-# $currentYear = Get-Date -Format "yyyy"
-# $upcomingMovies = Get-UpcomingMoviesForCurrentYear -Year $currentYear -ApiKey $config.Apis.TmdbApiKey -BaseURL $config.Endpoints.TmdbEndpoint
-# if (-not $upcomingMovies) {
-#     Write-Host "No upcoming movies found for the current year."
-# }
-# else {
-#     Write-Host "Upcoming movies for the current year:"
-#     foreach ($movie in $upcomingMovies.results) {
-#         Write-Host "$($movie.title) - Release Date: $($movie.release_date)"
-#     }
-# }
-
-
-# function Filter-UpcomingMovies {
-#     param (
-#         [array]$Movies
-#     )
-
-#     $today = Get-Date
-#     $fourWeeksLater = $today.AddDays(28)
-
-#     $filteredMovies = $Movies | Where-Object { ([DateTime]::Parse($_.release_date) -ge $today) -and ([DateTime]::Parse($_.release_date) -lt $fourWeeksLater) }
-
-#     return $filteredMovies
-# }
-# ,
-#  Write-Error = to load config"
-# # Get-FutureFilms function
-# function Get-FutureFilms {
-#     $config = Get-Configuration
-#     if (-not $config) {
-#         Write-Error "Fail
-#     }
-
-#     $upcomingMovies = Get-UpcomingMoviesWithBearerToken -BearerToken $config.Apis.TmdbBearerToken -BaseURL $config.Endpoints.TmdbEndpoint
-#     if (-not $upcomingMovies) {
-#         exit 1
-#     }
-
-#     $filteredMovies = Filter-UpcomingMovies -Movies $upcomingMovies.results
-
-#     # Print the filtered upcoming movies
-#     if ($filteredMovies) {
-#         Write-Host "Upcoming movies releasing in the next four weeks:"
-#         foreach ($movie in $filteredMovies) {
-#             Write-Host "$($movie.title) - Release Date: $($movie.release_date)"
-#         }
-#     } else {
-#         Write-Host "No upcoming movies found in the next four weeks."
-#     }
-# }
-# ,
-#  Write-Error = to load config"
-# # Get-FutureFilms function
-# function Get-FutureFilms {
-#     $config = Get-Configuration
-#     if (-not $config) {
-#         Write-Error "Fail
-#         return
-#     }
-
-#     $upcomingMovies = Get-UpcomingMovies -ApiKey $config.Apis.TmdbApiKey -BaseURL $config.Endpoints.TmdbEndpoint
-#     if (-not $upcomingMovies) {
-#         exit 1
-#     }
-
-#     $filteredMovies = Filter-UpcomingMovies -Movies $upcomingMovies.results
-
-#     # Print the filtered upcoming movies
-#     if ($filteredMovies) {
-#         Write-Host "Upcoming movies releasing in the next four weeks:"
-#         foreach ($movie in $filteredMovies) {
-#             Write-Host "$($movie.title) - Release Date: $($movie.release_date)"
-#         }
-#     } else {
-#         Write-Host "No upcoming movies found in the next four weeks."
-#     }
-#     # # Get data from OMDB
-#     # $omdbData = Get-Data -title "Civil War" -year "2024" -baseURL $config.Endpoints.OmdbEndpoint -apiKey $config.Apis.OmdbApiKey -typeParam "movie"
-#     # if (-not $omdbData) {
-#     #     Write-Error "Failed to get data from OMDB API"
-#     #     return
-#     # }
-
-#     # Get data from TMDb using API key
-#     $tmdbDataWithApiKey = Get-TmdbDataWithApiKey -MovieId "11" -ApiKey $config.Apis.TmdbApiKey -BaseURL $config.Endpoints.TmdbEndpoint
-
-#     if (-not $tmdbDataWithApiKey) {
-#         Write-Error "Failed to get data from TMDb API with API key"
-#         return
-#     }
-
-#     # Get data from TMDb using Bearer token
-#     $tmdbDataWithBearerToken = Get-TmdbDataWithBearerToken -MovieId "11" -BearerToken $config.Apis.TmdbBearerToken -BaseURL $config.Endpoints.TmdbEndpoint
-#     if (-not $tmdbDataWithBearerToken) {
-#         Write-Error "Failed to get data from TMDb API with Bearer token"
-#         return
-#     }
-
-#     # Print some information from the data
-#     Write-Host "OMDB Data: $($omdbData | ConvertTo-Json -Depth 5)"
-#     Write-Host "TMDb Data with API Key: $($tmdbDataWithApiKey | ConvertTo-Json -Depth 5)"
-#     Write-Host "TMDb Data with Bearer Token: $($tmdbDataWithBearerToken | ConvertTo-Json -Depth 5)"
-# }
-
-# # Run Get-FutureFilms function
-# Get-FutureFilms
