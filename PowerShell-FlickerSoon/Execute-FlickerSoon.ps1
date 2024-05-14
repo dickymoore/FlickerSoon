@@ -284,14 +284,14 @@ function New-Recommendations {
         `$yearRange = $($yearRange)
         )
     "
-    foreach ($movie in $movies) {
+    $recommendationSummary = foreach ($movie in $movies) {
         Write-Debug "Processing movie: $($movie.title)"
         Write-Debug "Getting all people with the specified role"
         $people = $movie.Cast + $movie.Crew | Where-Object { $_.job -eq $recommendationType }
         Write-Debug "Found $(($people | Measure-Object).count) people with the $($recommendationType) role: $($people.name)"
         $processedMovies = @()
         $peopleSummaries = foreach ($person in $people) {
-            Write-Debug "Looking for credits for: $($people.name) with ID: $($person.id)"
+            Write-Debug "Looking for credits for: $($person.name) with ID: $($person.id)"
             Write-Debug "`$tmdbResponse = ((Invoke-WebRequest -Uri `"$($tmdbEndpoint)/3/person/$($person.id)/combined_credits?api_key=$($tmdbApi)`" -Method GET).Content | ConvertFrom-Json)"
             $tmdbResponse = ((Invoke-WebRequest -Uri "$($tmdbEndpoint)/3/person/$($person.id)/combined_credits?api_key=$($tmdbApi)" -Method GET).Content | ConvertFrom-Json)
             $personInfoAll = $tmdbResponse.cast + $tmdbResponse.crew  | Where-Object -Property job -eq $recommendationType
@@ -376,6 +376,7 @@ function New-Recommendations {
                 } else {
                     Write-Debug "Historic movie: $($personProject.title) has already been processed under another person who worked on new release movie: $($movie.title) with the role: $($recommendationType).
                     This can happen if people with the role: $($recommendationType) work together repeatedly."
+                    $projectObject
                 }
             }
             $personSummary = Get-PersonSummary -ProjectsSummary $projectsSummary
@@ -383,6 +384,44 @@ function New-Recommendations {
             $personSummary
         }
         if (($peopleSummaries | Measure-Object).Count -gt 1) {
+
+            $averageIMDBRatingEntryTotal = 0
+            $averageIMDBRatingCount = 0
+            foreach ($entry in $peopleSummaries.AverageIMDBRating | Where-Object {$_ -ne 0}) {
+                $averageIMDBRatingEntryTotal += $entry
+                $averageIMDBRatingCount++
+            }
+            $averageIMDBRating = if ($averageIMDBRatingCount -gt 0) {
+                $($averageIMDBRatingEntryTotal/$averageIMDBRatingCount)
+            } else {
+                $averageIMDBRatingEntryTotal
+            }
+            # [math]::Round(($peopleSummaries.AverageIMDBRating | Measure-Object -Average).Average, 2)
+            $averageRottenTomatoesRatingEntryTotal = 0
+            $averageRottenTomatoesRatingCount = 0
+            foreach ($entry in $peopleSummaries.AverageRottenTomatoesRating | Where-Object {$_ -ne 0}) {
+                $averageRottenTomatoesRatingEntryTotal += $entry
+                $averageRottenTomatoesRatingCount++
+            }
+            $averageRottenTomatoesRating = if ($averageRottenTomatoesRatingCount -gt 0) {
+                $($averageRottenTomatoesRatingEntryTotal/$averageRottenTomatoesRatingCount)
+            } else {
+                $averageRottenTomatoesRatingEntryTotal
+            }
+            # [math]::Round(($peopleSummaries.AverageRottenTomatoesRating | Measure-Object -Average).Average, 2)
+            $averageBoxOfficeEntryTotal = 0
+            $averageBoxOfficeCount = 0
+            foreach ($entry in $peopleSummaries.AverageBoxOffice | Where-Object {$_ -ne 0}) {
+                $averageBoxOfficeEntryTotal += $entry
+                $averageBoxOfficeCount++
+            }
+            $averageBoxOffice = if ($averageBoxOfficeCount -gt 0) {
+                $($averageBoxOfficeEntryTotal/$averageBoxOfficeCount)
+            } else {
+                $averageBoxOfficeEntryTotal
+            }
+            # [math]::Round(($peopleSummaries.AverageBoxOffice | Measure-Object -Average).Average, 2)
+
             $mergedPerson = New-Object PSObject -Property @{
                 Role = $peopleSummaries[0].Role
                 Name = ($peopleSummaries.Name -join ' & ')
@@ -391,11 +430,12 @@ function New-Recommendations {
                 TotalRottenTomatoesRating = ($peopleSummaries.TotalRottenTomatoesRating | Measure-Object -Sum).Sum
                 MaxIMDBRating = ($peopleSummaries.MaxIMDBRating | Measure-Object -Maximum).Maximum
                 MaxRottenTomatoesRating = ($peopleSummaries.MaxRottenTomatoesRating | Measure-Object -Maximum).Maximum
-                AverageIMDBRating = [math]::Round(($peopleSummaries.AverageIMDBRating | Measure-Object -Average).Average, 2)
-                AverageRottenTomatoesRating = [math]::Round(($peopleSummaries.AverageRottenTomatoesRating | Measure-Object -Average).Average, 2)
                 TotalBoxOffice = ($peopleSummaries.TotalBoxOffice | Measure-Object -Sum).Sum
-                AverageBoxOffice = [math]::Round(($peopleSummaries.AverageBoxOffice | Measure-Object -Average).Average, 2)
                 UpcomingMovie = $peopleSummaries[0].UpcomingMovie
+                AverageIMDBRating = $averageIMDBRating
+                AverageRottenTomatoesRating = $averageRottenTomatoesRating
+                AverageBoxOffice = $averageBoxOffice
+                
             }
             # Output the merged person
             $mergedPerson
@@ -404,6 +444,7 @@ function New-Recommendations {
             $peopleSummaries
         }
     }
+    $recommendationSummary
 }
 
 function Get-Recommendations {
@@ -438,26 +479,28 @@ ___________________________
     $choice = Read-Host "Enter your choice"
     switch ($choice) {
         "1" {
-            New-Recommendations -movies $movies -config $config -recommendationType "Director"
+            $recommendationSummary = New-Recommendations -movies $movies -config $config -recommendationType "Director"
         }
         "2" {
-            New-Recommendations -movies $movies -config $config -recommendationType "Writer"
+            $recommendationSummary = New-Recommendations -movies $movies -config $config -recommendationType "Writer" # Needs fixing
         }
         "3" {
-            New-Recommendations -movies $movies -config $config -recommendationType "Producer"
+            $recommendationSummary = New-Recommendations -movies $movies -config $config -recommendationType "Producer"
         }
         "4" {
-            New-Recommendations -movies $movies -config $config -recommendationType "Actor"
+            $recommendationSummary = New-Recommendations -movies $movies -config $config -recommendationType "Actor" # Needs fixing
         }
         "5" {
-
+            return
         }
         default {
             Get-Recommendations
         }
     }
     # return output to screen or csv or out-grid
-
+    $recommendationSummary | Out-GridView
+    pause # needs working - how to output it etc?
+    
 }
 
 #######################
