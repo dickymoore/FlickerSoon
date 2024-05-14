@@ -8,6 +8,7 @@ param (
     $includeAdult = $null,
     $Region = $null,
     $maxLimit = $null,
+    $yearRange = $null,
     $configPath = "./config.json"
 )
 
@@ -206,6 +207,7 @@ function Out-UpcomingMovies {
         }
     }
 }
+
 function Get-PersonSummary {
     param (
         $ProjectsSummary
@@ -258,6 +260,7 @@ function Get-PersonSummary {
 
     $movieSummary
 }
+
 function New-Recommendations {
     param (
         $movies,
@@ -266,9 +269,9 @@ function New-Recommendations {
         $tmdbEndpoint = $config.Endpoints.TmdbEndpoint,
         $tmdbApi = $config.Apis.TmdbApiKey,
         $OmdbEndpoint = $config.Endpoints.OmdbEndpoint,
-        $OmdbApi = $config.Apis.OmdbApiKey
+        $OmdbApi = $config.Apis.OmdbApiKey,
+        $yearRange = $config.Settings.YearRange
     )
-    
     Write-Debug "
         New-Recommendations
         `$movies = $($movies | Measure-Object).count
@@ -278,14 +281,18 @@ function New-Recommendations {
         `$tmdbApi = $($tmdbApi)
         `$OmdbEndpoint = $($OmdbEndpoint)
         `$OmdbApi = $($OmdbApi)
+        `$yearRange = $($yearRange)
+        )
     "
-    $peopleData = @{}
     foreach ($movie in $movies) {
+        Write-Debug "Processing movie: $($movie.title)"
+        Write-Debug "Getting all people with the specified role"
         $people = $movie.Cast + $movie.Crew | Where-Object { $_.job -eq $recommendationType }
-        Write-Debug "Found $(($people | Measure-Object).count) people with that role: $($people.name)"
-        $allPeople = foreach ($person in $people) {
+        Write-Debug "Found $(($people | Measure-Object).count) people with the $($recommendationType) role: $($people.name)"
+        $processedMovies = @()
+        $peopleSummaries = foreach ($person in $people) {
             Write-Debug "Looking for credits for: $($people.name) with ID: $($person.id)"
-            Write-Debug "((Invoke-WebRequest -Uri `"$($tmdbEndpoint)/3/person/$($person.id)/combined_credits?api_key=$($tmdbApi)`" -Method GET).Content | ConvertFrom-Json)"
+            Write-Debug "`$tmdbResponse = ((Invoke-WebRequest -Uri `"$($tmdbEndpoint)/3/person/$($person.id)/combined_credits?api_key=$($tmdbApi)`" -Method GET).Content | ConvertFrom-Json)"
             $tmdbResponse = ((Invoke-WebRequest -Uri "$($tmdbEndpoint)/3/person/$($person.id)/combined_credits?api_key=$($tmdbApi)" -Method GET).Content | ConvertFrom-Json)
             $personInfoAll = $tmdbResponse.cast + $tmdbResponse.crew  | Where-Object -Property job -eq $recommendationType
             $personInfoMovieOnly = $personInfoAll | Where-Object {
@@ -294,228 +301,109 @@ function New-Recommendations {
             $personInfoHistoric = $personInfoMovieOnly | Where-Object {
                 $_.release_date
             } | Where-Object {
-                ([datetime]::Parse($_.release_date) -lt [datetime]::Now)
+                ([datetime]::Parse($_.release_date) -lt (Get-Date).AddDays(-1))
             }
             $projectsSummary = foreach ($personProject in ($personInfoHistoric)) {
                 $projectObject = [PSCustomObject]@{}
                 if ($person.name) { 
                     $projectObject | Add-Member -MemberType NoteProperty -Name "Name" -Value $person.name 
                 } else {
-                    $projectObject | Add-Member -MemberType NoteProperty -Name "Name" -Value 0
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Name" -Value "Error"
                 }
                 if ($person.id) { 
                     $projectObject | Add-Member -MemberType NoteProperty -Name "Person_id" -Value $person.id 
                 } else {
                     $projectObject | Add-Member -MemberType NoteProperty -Name "Person_id" -Value 0
                 }
-                if ($personProject.title) { 
-                    $projectObject | Add-Member -MemberType NoteProperty -Name "Title" -Value $personProject.title 
-                } else {
-                    $projectObject | Add-Member -MemberType NoteProperty -Name "Title" -Value 0
-                }
                 if ($personProject.job) { 
                     $projectObject | Add-Member -MemberType NoteProperty -Name "Role" -Value $personProject.job 
                 } else {
                     $projectObject | Add-Member -MemberType NoteProperty -Name "Role" -Value 0
                 }
-                if ($personProject.release_date) { 
-                    $projectObject | Add-Member -MemberType NoteProperty -Name "Release_date" -Value $personProject.release_date 
-                } else {
-                    $projectObject | Add-Member -MemberType NoteProperty -Name "Release_date" -Value 0
-                }
-                try {
-                    $movieTitle = $projectObject.Title -replace ' ','+'
-                    $year = (Get-Date $personProject.release_date).Year
-                
-                    $url = "$OmdbEndpoint/?apikey=$omdbApi&t=$movieTitle&y=$year"
-                    $response = Invoke-RestMethod -Uri $url -Method GET
-
-                    if ($response.Error -eq "Movie not found!") {
-                        Write-Debug "Movie $($movieTitle) not found in $year. Trying one year earlier and one year later."
-                        $urlBefore = "$OmdbEndpoint/?apikey=$omdbApi&t=$movieTitle&y=$($year - 1)"
-                        $responseBefore = Invoke-RestMethod -Uri $urlBefore -Method GET
-                        if ($responseBefore.Error -ne "Movie not found!") {
-                            Write-Debug "Movie $($movieTitle) found in $($year -1)."
-                            $response = $responseBefore
-                        } else {
-                            $urlAfter = "$OmdbEndpoint/?apikey=$omdbApi&t=$movieTitle&y=$($year + 1)"
-                            $responseAfter = Invoke-RestMethod -Uri $urlAfter -Method GET
-                            if ($responseAfter.Error -ne "Movie not found!") {
-                                $response = $responseAfter
-                                Write-Debug "Movie $($movieTitle)  found in $($year +1)."
-                            }
-                        }
-                    }
-                    if ($response.Response -eq "True") {
-                        $imdbRating = if ($response.Ratings | Where-Object -property Source -eq "Internet Movie Database") { [math]::Round((($response.Ratings | Where-Object { $_.Source -eq "Internet Movie Database" }).Value).replace('/10','') / 10 * 100)} else {0}
-                        $rottenTomatoesRating = if ($response.Ratings | Where-Object -property Source -eq "Rotten Tomatoes") {(($response.Ratings | Where-Object { $_.Source -eq "Rotten Tomatoes" }).Value).replace('%','')} else {0}
-                        [int]$boxOffice = if ([bool]($response.BoxOffice -as [int])) {($response.BoxOffice).replace(',','').replace('$','')} else {0}
+                if (!($processedMovies -contains $personProject.title)) {
+                    $processedMovies += $personProject.title
+                    if ($personProject.title) { 
+                        $projectObject | Add-Member -MemberType NoteProperty -Name "Title" -Value $personProject.title 
                     } else {
-                        $imdbRating = 0
-                        $rottenTomatoesRating = 0
-                        [int]$boxOffice = 0
+                        $projectObject | Add-Member -MemberType NoteProperty -Name "Title" -Value 0
                     }
-                } catch {
-                    $imdbRating = 0
-                    $rottenTomatoesRating = 0
-                    [int]$boxOffice = 0
-                }
-                $projectObject | Add-Member -MemberType NoteProperty -Name "IMDB_Rating" -Value $imdbRating
-                $projectObject | Add-Member -MemberType NoteProperty -Name "Rotten_Tomatoes_Rating" -Value $rottenTomatoesRating
-                $projectObject | Add-Member -MemberType NoteProperty -Name "BoxOffice" -Value $boxOffice
-                $projectObject
-            }
-            Get-PersonSummary -ProjectsSummary $projectsSummary
-        }
-        $allPeople | Add-Member -MemberType NoteProperty -Name "Movie" -Value $movie.title
-        $allPeople
-        pause
-    }
-}
-function New-Recommendations {
-    param (
-        $movies,
-        $config,
-        $recommendationType,
-        $tmdbEndpoint = $config.Endpoints.TmdbEndpoint,
-        $tmdbApi = $config.Apis.TmdbApiKey,
-        $OmdbEndpoint = $config.Endpoints.OmdbEndpoint,
-        $OmdbApi = $config.Apis.OmdbApiKey
-    )
-    
-    Write-Debug "Starting New-Recommendations function"
-    $peopleData = @{}
-    foreach ($movie in $movies) {
-        Write-Debug "Processing movie: $($movie.title)"
-        Write-Debug "Get all people with the specified role"
-        $people = $movie.Cast + $movie.Crew | Where-Object { $_.job -eq $recommendationType }
-
-        foreach ($person in $people) {
-            Write-Debug "Processing person: $($person.name)"
-            
-            Write-Debug "Check if this person already exists in the hashtable"
-            if ($peopleData.ContainsKey($person.id)) {
-                Write-Debug "Person $($person.name) already exists in data"
-                $personData = $peopleData[$person.id]
-            }
-            else {
-                Write-Debug "Creating new entry for person $($person.name)"
-                Write-Debug "Initialize a new hashtable for this person"
-                $personData = @{
-                    Name = $person.name
-                    Movie = $movie.Title
-                    Credits = 0
-                    TotalIMDBRating = 0
-                    TotalRottenTomatoesRating = 0
-                    MaxIMDBRating = 0
-                    MaxRottenTomatoesRating = 0
-                    TotalBoxOffice = 0
-                }
-            }
-
-            Write-Debug "Increment credits count"
-            $personData.Credits++
-
-            Write-Debug "Fetch additional data for each project"
-            $personProjects = Invoke-RestMethod -Uri "$($tmdbEndpoint)/3/person/$($person.id)/combined_credits?api_key=$($tmdbApi)" -Method Get
-            $projectsSummary = foreach ($personProject in ($personProjects.cast + $personProjects.crew)) {
-                Write-Debug "Process project details"
-                $projectObject = [PSCustomObject]@{
-                    Name = $person.name
-                    Person_id = $person.id
-                    Title = $personProject.title
-                    Role = $personProject.job
-                    Release_date = $personProject.release_date
-                }
-                try {
-                    $movieTitle = $projectObject.Title -replace ' ','+'
-                    $year = (Get-Date $personProject.release_date).Year
-                
-                    $url = "$OmdbEndpoint/?apikey=$omdbApi&t=$movieTitle&y=$year"
-                    $response = Invoke-RestMethod -Uri $url -Method GET
-
-                    Write-Debug "If movie not found for the release year, try adjacent years within the range"
-                    if ($response.Error -eq "Movie not found!") {
-                        Write-Debug "Movie $($movieTitle) not found in $year. Trying adjacent years within the range."
-                        
-                        Write-Debug "Iterate through a range of years around the release year to search for movie ratings"
-                        for ($i = ($year - $yearRange); $i -le ($year + $yearRange); $i++) {
-                            if ($i -ne $year) {
-                                $url = "$OmdbEndpoint/?apikey=$OmdbApi&t=$movieTitle&y=$i"
-                                $responseTemp = Invoke-RestMethod -Uri $url -Method GET
-                                
-                                Write-Debug "If movie found in an adjacent year, update response and exit the loop"
-                                if ($responseTemp.Response -eq "True") {
-                                    $response = $responseTemp
-                                    Write-Debug "Movie $($movieTitle) found in year $i."
-                                    break
+                    
+                    if ($personProject.release_date) { 
+                        $projectObject | Add-Member -MemberType NoteProperty -Name "Release_date" -Value $personProject.release_date 
+                    } else {
+                        $projectObject | Add-Member -MemberType NoteProperty -Name "Release_date" -Value 0
+                    }
+                    try {
+                        $movieTitle = $projectObject.Title -replace ' ','+'
+                        $year = (Get-Date $personProject.release_date).Year
+                    
+                        $url = "$OmdbEndpoint/?apikey=$omdbApi&t=$movieTitle&y=$year"
+                        $response = Invoke-RestMethod -Uri $url -Method GET
+                        if ($response.Error -eq "Movie not found!") {
+                            Write-Debug "Movie $($movieTitle) not found in $year. Trying adjacent years within the range: $($yearRange)."
+                            for ($i = ($year - [math]::Round($yearRange/2)); $i -le ($year + [math]::Round($yearRange/2)); $i++) {
+                                if ($i -ne $year) {
+                                    $url = "$OmdbEndpoint/?apikey=$OmdbApi&t=$movieTitle&y=$i"
+                                    $responseTemp = Invoke-RestMethod -Uri $url -Method GET
+                                    
+                                    Write-Debug "If movie found in an adjacent year, update response and exit the loop"
+                                    if (!($responseTemp.Response -eq "False")) {
+                                        $response = $responseTemp
+                                        Write-Debug "Movie $($movieTitle) found in year $i."
+                                        break
+                                    }
                                 }
                             }
                         }
-                    }
-
-                    if ($response.Response -eq "True") {
-                        $imdbRating = if ($response.Ratings | Where-Object -property Source -eq "Internet Movie Database") { [math]::Round((($response.Ratings | Where-Object { $_.Source -eq "Internet Movie Database" }).Value).replace('/10','') / 10 * 100)} else {0}
-                        $rottenTomatoesRating = if ($response.Ratings | Where-Object -property Source -eq "Rotten Tomatoes") {(($response.Ratings | Where-Object { $_.Source -eq "Rotten Tomatoes" }).Value).replace('%','')} else {0}
-                        [int]$boxOffice = if ([bool]($response.BoxOffice -as [int])) {($response.BoxOffice).replace(',','').replace('$','')} else {0}
-                    } else {
+                        if ($response.Response -eq "True") {
+                            $imdbRating = if ($response.Ratings | Where-Object -property Source -eq "Internet Movie Database") { [math]::Round((($response.Ratings | Where-Object { $_.Source -eq "Internet Movie Database" }).Value).replace('/10','') / 10 * 100)} else {0}
+                            $rottenTomatoesRating = if ($response.Ratings | Where-Object -property Source -eq "Rotten Tomatoes") {(($response.Ratings | Where-Object { $_.Source -eq "Rotten Tomatoes" }).Value).replace('%','')} else {0}
+                            [int]$boxOffice = if ([bool]($response.BoxOffice -as [int])) {($response.BoxOffice).replace(',','').replace('$','')} else {0}
+                        } else {
+                            $imdbRating = 0
+                            $rottenTomatoesRating = 0
+                            [int]$boxOffice = 0
+                        }
+                    } catch {
                         $imdbRating = 0
                         $rottenTomatoesRating = 0
                         [int]$boxOffice = 0
                     }
-                } catch {
-                    $imdbRating = 0
-                    $rottenTomatoesRating = 0
-                    [int]$boxOffice = 0
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "IMDB_Rating" -Value $imdbRating
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "Rotten_Tomatoes_Rating" -Value $rottenTomatoesRating
+                    $projectObject | Add-Member -MemberType NoteProperty -Name "BoxOffice" -Value $boxOffice
+                    $projectObject
+                } else {
+                    Write-Debug "Historic movie: $($personProject.title) has already been processed under another person who worked on new release movie: $($movie.title) with the role: $($recommendationType).
+                    This can happen if people with the role: $($recommendationType) work together repeatedly."
                 }
-                $projectObject | Add-Member -MemberType NoteProperty -Name "IMDB_Rating" -Value $imdbRating
-                $projectObject | Add-Member -MemberType NoteProperty -Name "Rotten_Tomatoes_Rating" -Value $rottenTomatoesRating
-                $projectObject | Add-Member -MemberType NoteProperty -Name "BoxOffice" -Value $boxOffice
-                $projectObject
             }
-
-            Write-Debug "Update aggregated data for this person"
-            $personData.TotalIMDBRating += ($projectsSummary | Measure-Object -Property IMDB_Rating -Sum).Sum
-            $personData.TotalRottenTomatoesRating += ($projectsSummary | Measure-Object -Property Rotten_Tomatoes_Rating -Sum).Sum
-            $personData.MaxIMDBRating = [Math]::Max($personData.MaxIMDBRating, ($projectsSummary | Measure-Object -Property IMDB_Rating -Maximum).Maximum)
-            $personData.MaxRottenTomatoesRating = [Math]::Max($personData.MaxRottenTomatoesRating, ($projectsSummary | Measure-Object -Property Rotten_Tomatoes_Rating -Maximum).Maximum)
-            $personData.TotalBoxOffice += ($projectsSummary | Measure-Object -Property BoxOffice -Sum).Sum
-
-            Write-Debug "Update or add this person's data to the hashtable"
-            $peopleData[$person.id] = $personData
+            $personSummary = Get-PersonSummary -ProjectsSummary $projectsSummary
+            $personSummary | Add-Member NoteProperty -Name UpcomingMovie -Value $($movie.title)
+            $personSummary
+        }
+        if (($peopleSummaries | Measure-Object).Count -gt 1) {
+            $mergedPerson = New-Object PSObject -Property @{
+                Role = $peopleSummaries[0].Role
+                Name = ($peopleSummaries.Name -join ' & ')
+                Credits = ($peopleSummaries.Credits | Measure-Object -Sum).Sum
+                TotalIMDBRating = ($peopleSummaries.TotalIMDBRating | Measure-Object -Sum).Sum
+                TotalRottenTomatoesRating = ($peopleSummaries.TotalRottenTomatoesRating | Measure-Object -Sum).Sum
+                MaxIMDBRating = ($peopleSummaries.MaxIMDBRating | Measure-Object -Maximum).Maximum
+                MaxRottenTomatoesRating = ($peopleSummaries.MaxRottenTomatoesRating | Measure-Object -Maximum).Maximum
+                AverageIMDBRating = [math]::Round(($peopleSummaries.AverageIMDBRating | Measure-Object -Average).Average, 2)
+                AverageRottenTomatoesRating = [math]::Round(($peopleSummaries.AverageRottenTomatoesRating | Measure-Object -Average).Average, 2)
+                TotalBoxOffice = ($peopleSummaries.TotalBoxOffice | Measure-Object -Sum).Sum
+                AverageBoxOffice = [math]::Round(($peopleSummaries.AverageBoxOffice | Measure-Object -Average).Average, 2)
+                UpcomingMovie = $peopleSummaries[0].UpcomingMovie
+            }
+            # Output the merged person
+            $mergedPerson
+        } else {
+            # If there's only one person, return it as is
+            $peopleSummaries
         }
     }
-
-        Write-Debug "Process aggregated data and return recommendations"
-
-    Write-Debug "Create an array to store recommendations"
-    $recommendations = @()
-
-    foreach ($personId in $peopleData.Keys) {
-        Write-Debug "Retrieve person data"
-        $personData = $peopleData[$personId]
-
-        Write-Debug "Calculate average ratings"
-        $averageIMDBRating = if ($personData.Credits -gt 0) { $personData.TotalIMDBRating / $personData.Credits } else { 0 }
-        $averageRottenTomatoesRating = if ($personData.Credits -gt 0) { $personData.TotalRottenTomatoesRating / $personData.Credits } else { 0 }
-
-        Write-Debug "Construct recommendation object"
-        $recommendation = [PSCustomObject]@{
-            Name = $personData.Name
-            Credits = $personData.Credits
-            AverageIMDBRating = $averageIMDBRating
-            AverageRottenTomatoesRating = $averageRottenTomatoesRating
-            MaxIMDBRating = $personData.MaxIMDBRating
-            MaxRottenTomatoesRating = $personData.MaxRottenTomatoesRating
-            TotalBoxOffice = $personData.TotalBoxOffice
-        }
-
-        Write-Debug "Add recommendation to the array"
-        $recommendations += $recommendation
-    }
-
-    
-    $recommendations
 }
 
 function Get-Recommendations {
@@ -597,6 +485,7 @@ $config = if (![bool]$nullParameter) {
             $includeAdult = $includeAdult
             $Region = $Region
             $maxLimit = $maxLimit
+            $yearRange = $yearRange
         }
     }
 }
@@ -637,3 +526,5 @@ while ($true) {
     $includeAdult = $config.Settings.includeAdult
     $Region = $config.Settings.Region
     $MaxLimit = $config.Settings.MaxLimit
+    $yearRange = $config.Settings.YearRange
+    $movies = $upcomingMovieList
