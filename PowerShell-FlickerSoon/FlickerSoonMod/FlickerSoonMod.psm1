@@ -1,4 +1,4 @@
 # Import nested modules
-foreach (\DataProcessing\New-Recommendations.ps1 in \\*.ps1) {
-    . \DataProcessing\New-Recommendations.ps1
+foreach ($file in Get-ChildItem -filter *.ps1 -recurse -Path FlickerSoonMod) {
+    . $file
 }
