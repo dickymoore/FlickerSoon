@@ -9,6 +9,8 @@ param (
     $Region = $null,
     $maxLimit = $null,
     $yearRange = $null,
+    $cacheRefreshdays = $null,
+    $action = $null,
     $configPath = "./config.json"
 )
 
@@ -24,11 +26,26 @@ $ScriptPath = try {
     Join-Path -Path $Env:reposPath -ChildPath "FlickerSoon\PowerShell-FlickerSoon\FlickerSoonMod"
 }
 Write-Debug "Running in $($scriptPath)"
-Import-Module $(Join-Path -Path $scriptPath -ChildPath /FlickerSoonMod)
+Import-Module $(Join-Path -Path $scriptPath -ChildPath /FlickerSoonMod) -Force
+
 
 ################################################
 #
-# 1. Get configuration from parameters or config
+# Determine actions
+#
+################################################
+
+switch ($action) {
+    "Update-ConfigTemplate" {
+        Update-ConfigTemplate `
+        -inputFilePath $(Join-Path -Path $scriptPath -ChildPath "./config.json") `
+        -outputFilePath $(Join-Path -Path $scriptPath -ChildPath "./config_template.json")
+    }
+}
+
+################################################
+#
+# 2. Get configuration from parameters or config
 #
 ################################################
 
@@ -58,7 +75,7 @@ $config = if (![bool]$nullParameter) {
 
 ##########################
 #
-# 2. Get Upcoming Movies 
+# 3. Get Upcoming Movies 
 #
 ##########################
 
@@ -72,7 +89,7 @@ $upcomingMovieList = Get-UpcomingMovies `
 
 ###########################
 #
-# Prompt for action
+# 4. Prompt for action
 # 
 ###########################
 
